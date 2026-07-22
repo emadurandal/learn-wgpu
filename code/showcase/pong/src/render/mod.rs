@@ -40,12 +40,15 @@ impl<'a> Render<'a> {
         log::warn!("size: {:?}", size);
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
             #[cfg(target_arch = "wasm32")]
             backends: wgpu::Backends::GL,
-            ..Default::default()
+            flags: Default::default(),
+            memory_budget_thresholds: Default::default(),
+            backend_options: Default::default(),
+            display: None,
         });
 
         let surface = instance.create_surface(window.clone()).unwrap();
@@ -55,6 +58,7 @@ impl<'a> Render<'a> {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: true,
             })
             .await
             .unwrap();
@@ -89,6 +93,7 @@ impl<'a> Render<'a> {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -221,7 +226,7 @@ impl<'a> Render<'a> {
 
                 self.staging_belt.finish();
                 self.queue.submit(iter::once(encoder.finish()));
-                frame.present();
+                display.queue.present(frame);
             }
             Err(wgpu::SurfaceError::Outdated) => {
                 log::info!("Outdated surface texture");
@@ -263,7 +268,7 @@ fn create_render_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     color_format: wgpu::TextureFormat,
-    vertex_layouts: &[wgpu::VertexBufferLayout],
+    vertex_layouts: &[Option<wgpu::VertexBufferLayout>],
     vs_src: wgpu::ShaderModuleDescriptor,
     fs_src: wgpu::ShaderModuleDescriptor,
 ) -> wgpu::RenderPipeline {

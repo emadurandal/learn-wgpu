@@ -5,10 +5,7 @@ use std::{iter, mem};
 use pollster::FutureExt;
 
 async fn run() {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::all(),
-        ..Default::default()
-    });
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
         .await
@@ -138,16 +135,16 @@ async fn run() {
 
         // Create the map request
         let buffer_slice = output_buffer.slice(..);
-        let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
+        let (tx, rx) = flume::bounded(1);
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             tx.send(result).unwrap();
         });
         // wait for the GPU to finish
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
-        match rx.receive().await {
-            Some(Ok(())) => {
-                let padded_data = buffer_slice.get_mapped_range();
+        match rx.recv_async().await {
+            Ok(Ok(())) => {
+                let padded_data = buffer_slice.get_mapped_range().unwrap();
                 let data = padded_data
                     .chunks(padded_bytes_per_row as _)
                     .map(|chunk| &chunk[..unpadded_bytes_per_row as _])

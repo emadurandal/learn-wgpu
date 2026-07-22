@@ -13,7 +13,27 @@ If you want to check out the demo, just head over to [the write up](../showcase/
 `SwapchainFrame` is no longer a thing. Instead `get_current_texture` will return a `SurfaceTexture` directly. This means that getting a frame to draw to looks somethings like this:
 
 ```rust
-let output = self.surface.get_current_texture()?;
+let output = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
+            wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => {
+                surface_texture
+            }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Validation => {
+                // Skip this frame
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.config);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                // You could recreate the devices and all resources
+                // created with it here, but we'll just bail
+                anyhow::bail!("Lost device");
+            }
+        };
 let view = output
     .texture
     .create_view(&wgpu::TextureViewDescriptor::default());
@@ -23,7 +43,7 @@ Another change is that you must call `SurfaceTexture::present()` after you submi
 
 ```rust
 self.queue.submit(iter::once(encoder.finish()));
-output.present();
+self.queue.present(output);
 ```
 
 There are a good deal of internal changes such as WebGL support (which I really need to cover). You can check out more on wgpu's [changelog](https://github.com/gfx-rs/wgpu/blob/master/CHANGELOG.md#wgpu-011-2021-10-07).
@@ -61,7 +81,27 @@ if width > 0 && height > 0 {
 Finally, getting a `SurfaceTexture` to draw to will use the surface directly.
 
 ```rust
-let output = self.surface.get_current_texture()?;
+let output = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
+            wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => {
+                surface_texture
+            }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Validation => {
+                // Skip this frame
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.config);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                // You could recreate the devices and all resources
+                // created with it here, but we'll just bail
+                anyhow::bail!("Lost device");
+            }
+        };
 let view = output
     .texture
     .create_view(&wgpu::TextureViewDescriptor::default());

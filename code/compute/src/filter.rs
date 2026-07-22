@@ -2,7 +2,7 @@ use flume::bounded;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 pub async fn run() -> anyhow::Result<()> {
-    let instance = wgpu::Instance::new(&Default::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = instance.request_adapter(&Default::default()).await.unwrap();
     let (device, queue) = adapter.request_device(&Default::default()).await.unwrap();
 
@@ -70,7 +70,7 @@ pub async fn run() -> anyhow::Result<()> {
         device.poll(wgpu::PollType::wait_indefinitely())?;
         rx.recv_async().await??;
 
-        let output_data = temp_buffer.get_mapped_range(..);
+        let output_data = temp_buffer.get_mapped_range(..)?;
         let u32_data = bytemuck::cast_slice::<_, u32>(&output_data);
 
         // Confirm that the list is sorted

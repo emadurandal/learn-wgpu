@@ -2,9 +2,9 @@ use core::f32;
 use core::f32::consts::PI;
 use std::path::Path;
 
+use framework::rand::{self, Rng};
 use framework::{Demo, MaterialBinder, ModelVertex, Vertex};
 use glam::{Vec3, Vec4};
-use framework::rand::{self, Rng};
 use winit::keyboard::KeyCode;
 
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -37,10 +37,10 @@ fn random_position_scale(min: Vec3, max: Vec3) -> Vec4 {
 pub struct Stencil {
     instance_buffer: framework::RawBuffer<InstanceVertex>,
     camera_uniforms: framework::CameraUniform,
-    camera: framework::Camera,
-    camera_controller: framework::CameraController,
+    camera: framework::FpvCamera,
+    camera_controller: framework::FpvCameraController,
     camera_bind_group: wgpu::BindGroup,
-    projection: framework::Projection,
+    projection: framework::PerspectiveProjection,
     depth_stencil: wgpu::Texture,
     depth_stencil_view: wgpu::TextureView,
     depth_stencil_format: wgpu::TextureFormat,
@@ -84,9 +84,9 @@ impl Demo for Stencil {
             wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::VERTEX,
         );
 
-        let camera = framework::Camera::new(glam::vec3(10.0, 10.0, 10.0), -2.37, -0.5);
-        let camera_controller = framework::CameraController::new(1.0, 0.01);
-        let projection = framework::Projection::new(
+        let camera = framework::FpvCamera::new(glam::vec3(10.0, 10.0, 10.0), -2.37, -0.5);
+        let camera_controller = framework::FpvCameraController::new(1.0, 0.01);
+        let projection = framework::PerspectiveProjection::new(
             display.config.width,
             display.config.height,
             PI * 0.25,
@@ -150,7 +150,8 @@ impl Demo for Stencil {
             false,
             &display.device,
             &display.queue,
-        ).await?;
+        )
+        .await?;
 
         let material_binder = MaterialBinder::new(&display.device);
 
@@ -210,7 +211,7 @@ impl Demo for Stencil {
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("mask_pipeline_layout"),
-                    bind_group_layouts: &[&mask_bind_group_layout],
+                    bind_group_layouts: &[Some(&mask_bind_group_layout)],
                     immediate_size: 0,
                 });
 
@@ -222,8 +223,8 @@ impl Demo for Stencil {
             .cull_mode(Some(wgpu::Face::Back))
             .depth_stencil(wgpu::DepthStencilState {
                 format: depth_stencil_format,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
                 stencil: wgpu::StencilState {
                     write_mask: 0xFF,
                     read_mask: 0xFF,
@@ -254,7 +255,7 @@ impl Demo for Stencil {
         let model_pipeline_layout =
             display.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("model_pipeline_layout"),
-                bind_group_layouts: &[&camera_layout, material_binder.layout()],
+                bind_group_layouts: &[Some(&camera_layout), Some(material_binder.layout())],
                 immediate_size: 0,
             });
         let model_shader = wgpu::include_wgsl!("model.wgsl");
@@ -270,8 +271,8 @@ impl Demo for Stencil {
             })
             .depth_stencil(wgpu::DepthStencilState {
                 format: depth_stencil.format(),
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             })
@@ -291,8 +292,8 @@ impl Demo for Stencil {
             })
             .depth_stencil(wgpu::DepthStencilState {
                 format: depth_stencil.format(),
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState {
                     read_mask: 0xFF,
                     write_mask: 0xFF,
@@ -374,9 +375,21 @@ impl Demo for Stencil {
 
     fn render(&mut self, display: &mut framework::Display) {
         let frame = match display.surface().get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Outdated) => return,
-            Err(e) => panic!("{}", e),
+            wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
+            wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => {
+                display.configure();
+                surface_texture
+            }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Validation => return,
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                display.configure();
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                panic!("Context lost");
+            }
         };
 
         let view = frame.texture.create_view(&Default::default());
@@ -522,7 +535,7 @@ impl Demo for Stencil {
         }
 
         display.queue.submit([encoder.finish()]);
-        frame.present();
+        display.queue.present(frame);
     }
 }
 

@@ -121,7 +121,7 @@ impl TerrainPipeline {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("TerrainPipeline::Gen::PipelineLayout"),
-            bind_group_layouts: &[&gen_layout],
+            bind_group_layouts: &[Some(&gen_layout)],
             immediate_size: 0,
         });
         let gen_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -136,7 +136,11 @@ impl TerrainPipeline {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("TerrainPipeline::Render::PipelineLayout"),
-                bind_group_layouts: &[camera_layout, light_layout, material_layout],
+                bind_group_layouts: &[
+                    Some(camera_layout),
+                    Some(light_layout),
+                    Some(material_layout),
+                ],
                 immediate_size: 0,
             });
         let render_pipeline = create_render_pipeline(
@@ -144,7 +148,7 @@ impl TerrainPipeline {
             &render_pipeline_layout,
             color_format,
             depth_format,
-            &[wgpu::VertexBufferLayout {
+            &[Some(wgpu::VertexBufferLayout {
                 array_stride: 32,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &[
@@ -159,7 +163,7 @@ impl TerrainPipeline {
                         shader_location: 1,
                     },
                 ],
-            }],
+            })],
             &shader,
         );
 

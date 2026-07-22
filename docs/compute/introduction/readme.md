@@ -43,13 +43,13 @@ said, not all algorithms benefit from leveraging this compute power.
 I can't possibly make a comprehensive list of all the things you could use a GPU for,
 but here are some rules of thumb:
 
-- Tasks that can be easily parrallelized. GPUs don't like switching tasks, so if you
+- Tasks that can be easily parallelized. GPUs don't like switching tasks, so if you
 need the computation to use data from previous operations, compute shaders are likely
 to be slower than a CPU based approach. If each operation can excute without any
 knowledge of other operations, you can get a lot out of the GPU.
-- You already have the data on the GPU. If your working with texture or model data
-It can often be faster to process it with a compute shader rather than copying the data
-to the CPU, modifying it, than shipping that back to the GPU.
+- You already have the data on the GPU. If you're working with texture or model data,
+it can often be faster to process it with a compute shader rather than copying the data
+to the CPU, modifying it, then shipping that back to the GPU.
 - You have a massive amount of data. At some point the size of your data starts to outweigh
 the setup time and complexity of using a compute pipeline. You'll still need to tailor
 your approach to the data and processing you need to do.
@@ -68,14 +68,14 @@ a device and queue with this simple code:
     let (device, queue) = adapter.request_device(&Default::default()).await.unwrap();
 ```
 
-<div class="note">
+<Note>
 
 I'm using [pollster](https://docs.rs/pollster) to handle `async` in the native code in
 these examples. You can use whatever `async` implementation you like though. I'm also
 using [anyhow](https://docs.rs/anyhow) for error handling, and [flume](https://docs.rs/flume)
 for it's `async` channel implementation.
 
-</div>
+</Note>
 
 If you want more info about these calls and the potential arguments you can pass
 to them check out [the rendering guide](../../beginner/tutorial2-surface/).
@@ -172,7 +172,7 @@ that the following:
 This means that we might not be able to use `@workgroup_size(64, 64, 1)` but `@workgroup_size(16, 16, 1)`
 should work on most devices.
 
-<div class="note">
+<Note>
 
 ### Why XYZ?
 
@@ -183,7 +183,7 @@ For example, a blur on a 2D image would benefit from a 2D work group so each thr
 match up to a pixel in the image. A marching cubes implementation would benefit from a 3D workgroup,
 so each thread handles the geometry for one voxel in the voxel grid.
 
-</div>
+</Note>
 
 ## The global invocation id
 
@@ -343,7 +343,7 @@ The process is a little involved so let's look at the code.
         rx.recv()??;
 
         // We then get the bytes that were stored in the buffer
-        let output_data = temp_buffer.get_mapped_range(..);
+        let output_data = temp_buffer.get_mapped_range(..)?;
 
         // Now we have the data on the CPU we can do what ever we want to with it
         assert_eq!(&input_data, bytemuck::cast_slice(&output_data));

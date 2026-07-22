@@ -12,6 +12,8 @@ use winit::{
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::EventLoopExtWebSys;
 
 mod texture;
 
@@ -288,12 +290,15 @@ impl State {
 
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
             #[cfg(target_arch = "wasm32")]
             backends: wgpu::Backends::GL,
-            ..Default::default()
+            flags: Default::default(),
+            memory_budget_thresholds: Default::default(),
+            backend_options: Default::default(),
+            display: None,
         });
 
         let surface = instance.create_surface(window.clone()).unwrap();
@@ -303,6 +308,7 @@ impl State {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: true,
             })
             .await
             .unwrap();
@@ -343,6 +349,7 @@ impl State {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
 
         let diffuse_bytes = include_bytes!("happy-tree.png");
@@ -471,7 +478,10 @@ impl State {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
+                bind_group_layouts: &[
+                    Some(&texture_bind_group_layout),
+                    Some(&camera_bind_group_layout),
+                ],
                 immediate_size: 0,
             });
 
@@ -481,7 +491,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc(), InstanceRaw::desc()],
+                buffers: &[Some(Vertex::desc()), Some(InstanceRaw::desc())],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -588,7 +598,7 @@ impl State {
         );
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render(&mut self) -> anyhow::Result<()> {
         self.window.request_redraw();
 
         // We can't render unless the surface is configured
@@ -596,7 +606,27 @@ impl State {
             return Ok(());
         }
 
-        let output = self.surface.get_current_texture()?;
+        let output = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
+            wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => {
+                surface_texture
+            }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Validation => {
+                // Skip this frame
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.config);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                // You could recreate the devices and all resources
+                // created with it here, but we'll just bail
+                anyhow::bail!("Lost device");
+            }
+        };
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -641,7 +671,7 @@ impl State {
         }
 
         self.queue.submit(iter::once(encoder.finish()));
-        output.present();
+        self.queue.present(output);
 
         Ok(())
     }
@@ -740,13 +770,10 @@ impl ApplicationHandler<State> for App {
                 state.update();
                 match state.render() {
                     Ok(_) => {}
-                    // Reconfigure the surface if it's lost or outdated
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        let size = state.window.inner_size();
-                        state.resize(size.width, size.height);
-                    }
                     Err(e) => {
-                        log::error!("Unable to render {}", e);
+                        // Log the error and exit gracefully
+                        log::error!("{e}");
+                        event_loop.exit();
                     }
                 }
             }
@@ -780,11 +807,16 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     let event_loop = EventLoop::with_user_event().build()?;
-    let mut app = App::new(
-        #[cfg(target_arch = "wasm32")]
-        &event_loop,
-    );
-    event_loop.run_app(&mut app)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut app = App::new();
+        event_loop.run_app(&mut app)?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let app = App::new(&event_loop);
+        event_loop.spawn_app(app);
+    }
 
     Ok(())
 }

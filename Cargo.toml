@@ -28,9 +28,9 @@ exclude = [
 ]
 
 [workspace.dependencies]
-wgpu = "28.0"
+wgpu = "30.0"
 anyhow = "1"
-glam = { version = "0.30.9", features = ["bytemuck"] }
+glam = { version = "0.30.9", features = ["bytemuck", "serde"] }
 bytemuck = { version = "1.13.1", features = ["derive"] }
 winit = { version = "0.30", features = ["android-native-activity"] }
 env_logger = "0.10"
@@ -39,3 +39,7 @@ image = "0.24.2"
 log = "0.4"
 tobj = { version = "3.2", default-features = false, features = ["async"] }
 web-time = "1"
+flume = "0.11.1"
+ab_glyph = "0.2.32"
+serde = { version = "1", features = ["derive"]}
+serde_json = "1"

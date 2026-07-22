@@ -1,4 +1,4 @@
-use std::{any::type_name, f32::consts::PI};
+use std::{any::type_name, f32::consts::PI, path::Path};
 
 use framework::Demo;
 use glam::vec3;
@@ -34,10 +34,10 @@ enum DisplayMode {
 struct Mipmaps {
     lmb_presssed: bool,
     camera_uniforms: framework::CameraUniform,
-    camera: framework::Camera,
-    camera_controller: framework::CameraController,
+    camera: framework::FpvCamera,
+    camera_controller: framework::FpvCameraController,
     camera_bind_group: wgpu::BindGroup,
-    projection: framework::Projection,
+    projection: framework::PerspectiveProjection,
     depth_view: wgpu::TextureView,
     depth_format: wgpu::TextureFormat,
     ground_vb: framework::RawBuffer<Vertex>,
@@ -58,12 +58,17 @@ impl std::fmt::Debug for Mipmaps {
 }
 
 impl Demo for Mipmaps {
-    async fn init(display: &framework::Display) -> anyhow::Result<Self> {
-        let projection =
-            framework::Projection::new(display.width(), display.height(), PI * 0.25, 0.1, 100.0);
+    async fn init(display: &framework::Display, _res_dir: &Path) -> anyhow::Result<Self> {
+        let projection = framework::PerspectiveProjection::new(
+            display.width(),
+            display.height(),
+            PI * 0.25,
+            0.1,
+            100.0,
+        );
 
-        let camera = framework::Camera::new(vec3(0.0, 1.0, 0.0), 0.0, 0.0);
-        let camera_controller = framework::CameraController::new(1.0, 0.01);
+        let camera = framework::FpvCamera::new(vec3(0.0, 1.0, 0.0), 0.0, 0.0);
+        let camera_controller = framework::FpvCameraController::new(1.0, 0.01);
         let mut camera_uniforms = framework::CameraUniform::new(&display.device);
         camera_uniforms.update_view_proj(&camera, &projection);
         let camera_layout =
@@ -418,7 +423,7 @@ impl Demo for Mipmaps {
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: None,
-                    bind_group_layouts: &[&camera_layout, &texture_layout],
+                    bind_group_layouts: &[Some(&camera_layout), Some(&texture_layout)],
                     immediate_size: 0,
                 });
 
@@ -506,9 +511,21 @@ impl Demo for Mipmaps {
 
     fn render(&mut self, display: &mut framework::Display) {
         let frame = match display.surface().get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Outdated) => return,
-            Err(e) => panic!("{}", e),
+            wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
+            wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => {
+                display.configure();
+                surface_texture
+            }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Validation => return,
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                display.configure();
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                panic!("Context lost");
+            }
         };
 
         let view = frame.texture.create_view(&Default::default());
@@ -572,7 +589,7 @@ impl Demo for Mipmaps {
         }
 
         display.queue.submit([encoder.finish()]);
-        frame.present();
+        display.queue.present(frame);
     }
 }
 

@@ -1,9 +1,9 @@
-pub mod prelude;
-pub mod resources;
 mod buffer;
 mod camera;
 mod light;
 mod pipeline;
+pub mod prelude;
+pub mod resources;
 mod shader_canvas;
 
 pub use buffer::*;
@@ -16,9 +16,13 @@ pub use shader_canvas::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::FutureExt;
+use winit::keyboard::KeyCode;
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::EventLoopExtWebSys;
 
 use std::ops::Deref;
 use std::path::Path;
+#[cfg(target_arch = "wasm32")]
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -28,12 +32,9 @@ use instant::{Duration, Instant};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::application::ApplicationHandler;
 use winit::event_loop::EventLoopProxy;
-use winit::{
-    event::*,
-    event_loop::EventLoop,
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
-};
+use winit::{event::*, event_loop::EventLoop, keyboard::PhysicalKey, window::Window};
+
+pub use winit;
 
 #[derive(Debug)]
 pub struct Display {
@@ -48,12 +49,15 @@ pub struct Display {
 impl Display {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Display> {
         let size = window.inner_size();
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
             #[cfg(target_arch = "wasm32")]
             backends: wgpu::Backends::GL,
-            ..Default::default()
+            flags: Default::default(),
+            memory_budget_thresholds: Default::default(),
+            backend_options: Default::default(),
+            display: None,
         });
         let surface = instance.create_surface(window.clone()).unwrap();
         let adapter = instance
@@ -61,6 +65,7 @@ impl Display {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: true,
             })
             .await?;
         let (device, queue) = adapter
@@ -98,6 +103,7 @@ impl Display {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
 
         Ok(Self {
@@ -192,9 +198,13 @@ impl CameraUniform {
         Self { data, buffer }
     }
 
-    pub fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
+    pub fn update_view_proj(
+        &mut self,
+        camera: &camera::FpvCamera,
+        projection: &camera::PerspectiveProjection,
+    ) {
         self.data.view_position = camera.position.extend(1.0);
-        self.data.view_proj = projection.calc_matrix() * camera.calc_matrix()
+        self.data.view_proj = projection.proj() * camera.view()
     }
 
     pub fn update_buffer(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
@@ -262,7 +272,10 @@ impl UniformBinding {
 }
 
 pub trait Demo: 'static + Sized + wgpu::WasmNotSend + std::fmt::Debug {
-    fn init(display: &Display, path: &Path) -> impl std::future::Future<Output = anyhow::Result<Self>> + wgpu::WasmNotSend;
+    fn init(
+        display: &Display,
+        path: &Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self>> + wgpu::WasmNotSend;
     fn resize(&mut self, display: &Display);
     fn update(&mut self, display: &Display, dt: Duration);
     fn render(&mut self, display: &mut Display);
@@ -298,8 +311,8 @@ impl<D: Demo + 'static> ApplicationHandler<anyhow::Result<(Display, D)>> for App
         #[cfg(target_arch = "wasm32")]
         {
             use wasm_bindgen::JsCast;
-            use winit::platform::web::WindowAttributesExtWebSys;
             use wasm_bindgen_futures::wasm_bindgen::UnwrapThrowExt;
+            use winit::platform::web::WindowAttributesExtWebSys;
 
             const CANVAS_ID: &str = "canvas";
 
@@ -444,8 +457,17 @@ pub fn run<D: Demo>() -> anyhow::Result<()> {
     log::info!("run");
 
     let event_loop = EventLoop::with_user_event().build()?;
-    let mut app = App::<D>::new(&event_loop);
-    event_loop.run_app(&mut app)?;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut app = App::<D>::new(&event_loop);
+        event_loop.run_app(&mut app)?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let app = App::<D>::new(&event_loop);
+        event_loop.spawn_app(app);
+    }
 
     Ok(())
 }

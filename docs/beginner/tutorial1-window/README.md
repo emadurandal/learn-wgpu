@@ -14,7 +14,7 @@ anyhow = "1.0"
 winit = { version = "0.30", features = ["android-native-activity"] }
 env_logger = "0.10"
 log = "0.4"
-wgpu = "28.0"
+wgpu = "30.0"
 pollster = "0.3"
 ```
 
@@ -47,6 +47,8 @@ use winit::{
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::EventLoopExtWebSys;
 
 // This will store the state of our game
 pub struct State {
@@ -76,7 +78,7 @@ impl State {
 // ...
 ```
 
-There's not much going on here, but once we start using WGPU will start filling this up pretty quick. Most of the methods on this struct are place holders, though in `render()` we ask the window to draw another frame as soon as possible as winit only draws one frame unless the window is resized or we request it to draw another one.
+There's not much going on here, but once we start using, we WGPU will start filling this up pretty quick. Most of the methods on this struct are place holders, though in `render()` we ask the window to draw another frame as soon as possible as winit only draws one frame unless the window is resized or we request it to draw another one.
 
 Now that we have our `State` struct, we need to tell winit how to use it. We'll create an `App` struct for this.
 
@@ -133,7 +135,7 @@ impl ApplicationHandler<State> for App {
         #[cfg(not(target_arch = "wasm32"))]
         {
             // If we are not on web we can use pollster to
-            // await the 
+            // await the window creation
             self.state = Some(pollster::block_on(State::new(window)).unwrap());
         }
 
@@ -178,7 +180,7 @@ The `resumed` method seems like it does a lot, but it only does a few things:
 - It defines attributes about the window including some web specific stuff.
 - We use those attributes to create the window.
 - We create a future that creates our `State` struct
-- On native we use pollster to get await the future
+- On native we use `pollster` to await the future
 - On web we run the future asynchronously which sends the results to the `user_event` function
 
 The `user_event` function just serves as a landing point for our `State` future. `resumed` isn't async so we need to offload the future and send the results somewhere.
@@ -241,11 +243,16 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     let event_loop = EventLoop::with_user_event().build()?;
-    let mut app = App::new(
-        #[cfg(target_arch = "wasm32")]
-        &event_loop,
-    );
-    event_loop.run_app(&mut app)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut app = App::new();
+        event_loop.run_app(&mut app)?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let app = App::new(&event_loop);
+        event_loop.spawn_app(app);
+    }
 
     Ok(())
 }
@@ -264,18 +271,23 @@ crate-type = ["cdylib", "rlib"]
 
 These lines tell Cargo that we want to allow our crate to build a native Rust static library (rlib) and a C/C++ compatible library (cdylib). We need rlib if we want to run wgpu in a desktop environment. We need cdylib to create the Web Assembly that the browser will run.
 
-<div class="note">
+<Note>
 
 ## Web Assembly
 
 Web Assembly, i.e. WASM, is a binary format supported by most modern browsers that allows lower-level languages such as Rust to run on a web page. This allows us to write the bulk of our application in Rust and use a few lines of Javascript to get it running in a web browser.
 
-</div>
+</Note>
 
 Now, all we need are some more dependencies that are specific to running in WASM:
 
 ```toml
 # This should go in the Cargo.toml in the root directory
+
+# This is not required for WASM as wasm-opt should take care of this.
+# It can also interfere with WASM builds so feel free to leave it out.
+# It helps if you are wanting to build native binaries, as it helps reduce
+# the size of the executable, and make it harder to reverse engineer.
 [profile.release]
 strip = true
 
@@ -285,7 +297,7 @@ strip = true
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.6"
 console_log = "1.0"
-wgpu = { version = "28.0", features = ["webgl"]}
+wgpu = { version = "30.0", features = ["webgl"]}
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.30"
 web-sys = { version = "0.3", features = [
@@ -329,7 +341,7 @@ Now you can build a wgpu application with just wasm-bindgen, but I ran into some
 
 To get around this shortcoming and to make the lives of everyone reading this easier, I opted to add [wasm-pack](https://drager.github.io/wasm-pack/) to the mix. Wasm-pack handles installing the correct version of wasm-bindgen for you, and it supports building for different types of web targets as well: browser, NodeJS, and bundlers such as webpack.
 
-To use wasm-pack, first, you need to [install it](https://drager.github.io/wasm-pack/).
+To use wasm-pack, first, you need to [install it](https://wasm-bindgen.github.io/wasm-pack/installer/).
 
 Once you've done that, we can use it to build our crate. If you only have one crate in your project, you can just use `wasm-pack build`. If you're using a workspace, you'll have to specify what crate you want to build. Imagine your crate is a directory called `game`. You would then use:
 
@@ -346,7 +358,7 @@ init().then(() => console.log("WASM Loaded"));
 
 This site uses [Vuepress](https://vuepress.vuejs.org/), so I load the WASM in a Vue component. How you handle your WASM will depend on what you want to do. If you want to check out how I'm doing things, take a look at [this](https://github.com/sotrh/learn-wgpu/blob/master/docs/.vuepress/components/WasmExample.vue).
 
-<div class="note">
+<Note>
 
 If you intend to use your WASM module in a plain HTML website, you'll need to tell wasm-pack to target the web:
 
@@ -389,7 +401,7 @@ You'll then need to run the WASM code in an ES6 Module:
 </html>
 ```
 
-</div>
+</Note>
 
 ## Demo
 
